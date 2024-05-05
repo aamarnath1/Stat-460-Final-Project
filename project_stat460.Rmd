@@ -1,0 +1,528 @@
+---
+title: "projectstat460"
+author: "Alyaqadhan Alfahdi"
+date: "2024-04-06"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(caret)
+library(stargazer)
+library(factoextra)
+```
+
+
+# EDA
+
+```{r}
+data <- read_csv("breast-cancer.csv")
+```
+
+
+
+
+```{r}
+head(data)
+```
+
+
+```{r}
+dim(data)
+```
+
+
+
+```{r}
+sum(is.na(data))
+```
+
+
+```{r}
+data <- data %>% 
+  select(- id)
+
+summary(data)
+```
+
+
+
+```{r}
+datan <- data %>% 
+  select(- diagnosis)
+stargazer(datan,type="text",title="Summary Statistics")
+```
+
+
+
+
+
+```{r}
+f1 <- ggplot(data, aes(x=factor(diagnosis), fill=factor(diagnosis))) +
+  geom_bar() +
+  labs(x="Class", y="Count", fill="Diagnosis") +
+  theme_minimal() +
+  scale_x_discrete(labels=c("B"="Benign", "M"="Malignant")) +
+  scale_fill_manual(values=c("B"="lightblue", "M"="salmon")) +
+  theme(legend.position = "none")
+  
+f1
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+data_percent <- data %>%
+  count(diagnosis) %>%
+  mutate(percentage = n / sum(n) * 100)
+
+
+f2 <- ggplot(data_percent, aes(x=factor(diagnosis), y=percentage, fill=factor(diagnosis))) +
+  geom_bar(stat="identity") +
+  labs(x="Class", y="Percentage", fill="Diagnosis") +
+  theme_minimal() +
+  scale_x_discrete(labels=c("B"="Benign", "M"="Malignant")) +
+  scale_fill_manual(values=c("B"="lightblue", "M"="salmon")) +
+  geom_text(aes(label=paste0(round(percentage, 1), "%")), vjust=-0.5) +
+  theme(legend.position = "none")
+
+f2
+```
+
+
+
+
+```{r}
+library(corrplot)
+M = cor(datan)
+f3 <-corrplot(M, method = 'circle', type = 'lower', insig='blank',tl.cex = 0.2,
+         addCoef.col ='black', number.cex = 0.1, order = 'AOE', diag=FALSE)
+
+f3
+```
+
+
+
+
+
+
+```{r}
+f3 <- corrplot(M, method = 'number',tl.cex = 0.5,number.cex = 0.3,order = 'AOE') 
+
+f3
+```
+
+
+```{r}
+X <- select(data, -diagnosis)
+y <- data$diagnosis
+#y <- ifelse(y == "M", 1, 0)
+```
+
+
+
+
+
+
+```{r}
+pca_result <- prcomp(X, scale. = TRUE)
+```
+
+
+
+```{r}
+fviz_eig(pca_result, addlabels = TRUE)
+
+```
+
+
+
+
+
+```{r}
+fviz_pca_var(pca_result, col.var = "cos2",
+            gradient.cols = c("black", "orange", "green"),
+            repel = TRUE)
+```
+
+
+
+
+```{r}
+fviz_cos2(pca_result, choice = "var", axes = 1:2)
+```
+
+
+
+```{r}
+explained_variance <- summary(pca_result)$importance[2,]
+cumulative_variance <- cumsum(explained_variance)
+
+# Find the number of PCs needed to explain at least 95% of the variance
+num_pcs <- which.min(abs(cumulative_variance - 0.95))
+print(num_pcs)
+
+# Plot to visualize
+plot(cumulative_variance, xlab = "Number of Components", ylab = "Cumulative Variance Explained", 
+     type = 'b', pch = 19, main = "PCA Cumulative Variance Explained")
+abline(h = 0.95, col = "red", lty = 2)
+abline(v = num_pcs, col = "blue", lty = 2)
+```
+
+
+```{r}
+X_pca <- pca_result$x
+#y <- as.factor(y)
+X_pca_selected <- X_pca[, 1:10] 
+
+```
+
+
+
+
+
+```{r}
+set.seed(460)
+train_index <- createDataPartition(y, p = 0.7, list = FALSE)
+x_train <- X_pca_selected[train_index, ]
+y_train <- y[train_index]
+x_test <- X_pca_selected[-train_index, ]
+y_test <- y[-train_index]
+y_test <- as.factor(y_test)
+y_train <- as.factor(y_train)
+```
+
+
+# RF
+
+```{r}
+modelType <- "rf"
+param_grid <- expand.grid(.mtry = c(2,4, 8,10))
+
+control <- trainControl(method = "cv",
+                        number = 7,
+                        classProbs = TRUE,  # Enable class probabilities
+                        summaryFunction = twoClassSummary,  # For classification
+                        savePredictions = TRUE)
+
+fit <- train(x = x_train, 
+             y = y_train, 
+             method = modelType, 
+             trControl = control, 
+             tuneGrid = param_grid, 
+             metric = "Accuracy")
+
+
+print(fit$bestTune)
+```
+
+
+
+```{r}
+predictions <- predict(fit, newdata = x_test)
+predictions <- factor(predictions, levels = levels(y_test))
+
+# Calculate accuracy on test data
+accuracy <- confusionMatrix(predictions, y_test)$overall['Accuracy']
+print(paste("Accuracy on test data:", accuracy))
+```
+
+
+```{r}
+library(cvms)
+library(rsvg)
+library(ggimage)
+cfm <- table("Truth"=y_test, "Predicted"=predictions) %>%
+  as_tibble()
+
+# Plot the confusion matrix
+c1 <- plot_confusion_matrix(cfm,
+                            target_col = "Truth",
+                            prediction_col = "Predicted",
+                            counts_col = "n") 
+c1
+```
+
+
+
+```{r}
+library(caret)
+
+confusionMatrix(data=factor(predictions, levels=levels(y_test)),
+                reference=factor(y_test),
+                mode="everything",
+                positive="M")
+
+```
+
+
+```{r}
+library(pROC)
+y1 <- ifelse(predictions == "M", 1, 0)
+y2 <- ifelse(y_test == "M", 1, 0)
+rocobj <- roc(y1, y2)
+auc <- round(auc(y1, y2),3)
+ggroc(rocobj, colour = 'steelblue', size = 2) +
+ggtitle(paste0('ROC Curve ', '(AUC = ', auc, ')'))
+
+```
+
+
+
+
+
+# SVM
+
+
+
+
+
+```{r}
+set.seed(460)
+modelType <- "svmLinear"
+params <- expand.grid(.C = c(0.001,0.1, 1, 10))
+
+control <- trainControl(method = "cv",
+                        number = 7,
+                        classProbs = TRUE,  
+                        summaryFunction = twoClassSummary, 
+                        savePredictions = TRUE)
+fit <- train(x = x_train, 
+             y = y_train, 
+             method = modelType, 
+             trControl = control, 
+             tuneGrid = params,  
+             metric = "Accuracy")
+
+
+print(fit$bestTune)
+```
+
+
+
+```{r}
+predictions <- predict(fit, newdata = x_test)
+predictions <- factor(predictions, levels = levels(y_test))
+
+# Calculate accuracy on test data
+accuracy <- confusionMatrix(predictions, y_test)$overall['Accuracy']
+print(paste("Accuracy on test data:", accuracy))
+```
+
+
+```{r}
+library(cvms)
+library(rsvg)
+library(ggimage)
+cfm <- table("Truth"=y_test, "Predicted"=predictions) %>%
+  as_tibble()
+
+# Plot the confusion matrix
+c1 <- plot_confusion_matrix(cfm,
+                            target_col = "Truth",
+                            prediction_col = "Predicted",
+                            counts_col = "n") 
+c1
+```
+
+
+
+```{r}
+library(caret)
+
+confusionMatrix(data=factor(predictions, levels=levels(y_test)),
+                reference=factor(y_test),
+                mode="everything",
+                positive="M")
+
+```
+
+
+```{r}
+library(pROC)
+y1 <- ifelse(predictions == "M", 1, 0)
+y2 <- ifelse(y_test == "M", 1, 0)
+rocobj <- roc(y1, y2)
+auc <- round(auc(y1, y2),3)
+ggroc(rocobj, colour = 'steelblue', size = 2) +
+ggtitle(paste0('ROC Curve ', '(AUC = ', auc, ')'))
+
+```
+
+# Logestic
+
+
+
+
+```{r}
+set.seed(460)
+modelType <- "glmnet"
+
+params <- expand.grid(
+  .alpha = c(0, 0.5, 1),  # Mixtures of L1 and L2
+  .lambda = c(0.001, 0.01, 0.1, 1, 10)  # Regularization strength
+)
+
+control <- trainControl(method = "cv",
+                        number = 7,
+                        classProbs = TRUE,  
+                        summaryFunction = twoClassSummary, 
+                        savePredictions = TRUE)
+fit <- train(x = x_train, 
+             y = y_train, 
+             method = modelType, 
+             trControl = control, 
+             tuneGrid = params,  
+             metric = "Accuracy")
+
+print(fit$bestTune)
+```
+
+
+
+```{r}
+predictions <- predict(fit, newdata = x_test)
+predictions <- factor(predictions, levels = levels(y_test))
+
+# Calculate accuracy on test data
+accuracy <- confusionMatrix(predictions, y_test)$overall['Accuracy']
+print(paste("Accuracy on test data:", accuracy))
+```
+
+
+```{r}
+library(cvms)
+library(rsvg)
+library(ggimage)
+cfm <- table("Truth"=y_test, "Predicted"=predictions) %>%
+  as_tibble()
+
+# Plot the confusion matrix
+c1 <- plot_confusion_matrix(cfm,
+                            target_col = "Truth",
+                            prediction_col = "Predicted",
+                            counts_col = "n") 
+c1
+```
+
+
+
+
+
+
+
+```{r}
+library(caret)
+
+confusionMatrix(data=factor(predictions, levels=levels(y_test)),
+                reference=factor(y_test),
+                mode="everything",
+                positive="M")
+
+```
+
+
+
+
+
+
+```{r}
+library(pROC)
+y1 <- ifelse(predictions == "M", 1, 0)
+y2 <- ifelse(y_test == "M", 1, 0)
+rocobj <- roc(y1, y2)
+auc <- round(auc(y1, y2),3)
+ggroc(rocobj, colour = 'steelblue', size = 2) +
+ggtitle(paste0('ROC Curve ', '(AUC = ', auc, ')'))
+
+```
+
+# KNN
+
+
+```{r}
+set.seed(460)
+modelType <- "knn"
+
+params <- expand.grid(.k = seq(1, 20, by = 2))
+
+control <- trainControl(method = "cv",
+                        number = 7,
+                        classProbs = TRUE,
+                        summaryFunction = twoClassSummary,
+                        savePredictions = TRUE)
+fit <- train(x = x_train, 
+             y = y_train, 
+             method = modelType, 
+             trControl = control, 
+             tuneGrid = params,  
+             metric = "Accuracy")
+
+print(fit$bestTune)
+```
+
+
+```{r}
+predictions <- predict(fit, newdata = x_test)
+predictions <- factor(predictions, levels = levels(y_test))
+
+# Calculate accuracy on test data
+accuracy <- confusionMatrix(predictions, y_test)$overall['Accuracy']
+print(paste("Accuracy on test data:", accuracy))
+```
+
+
+```{r}
+library(cvms)
+library(rsvg)
+library(ggimage)
+cfm <- table("Truth"=y_test, "Predicted"=predictions) %>%
+  as_tibble()
+
+# Plot the confusion matrix
+c1 <- plot_confusion_matrix(cfm,
+                            target_col = "Truth",
+                            prediction_col = "Predicted",
+                            counts_col = "n") 
+c1
+```
+
+
+
+```{r}
+library(caret)
+
+confusionMatrix(data=factor(predictions, levels=levels(y_test)),
+                reference=factor(y_test),
+                mode="everything",
+                positive="M")
+
+```
+
+
+```{r}
+library(pROC)
+y1 <- ifelse(predictions == "M", 1, 0)
+y2 <- ifelse(y_test == "M", 1, 0)
+rocobj <- roc(y1, y2)
+auc <- round(auc(y1, y2),3)
+ggroc(rocobj, colour = 'steelblue', size = 2) +
+ggtitle(paste0('ROC Curve ', '(AUC = ', auc, ')'))
+
+```
+
