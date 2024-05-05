@@ -1,4 +1,5 @@
-## A Comparison of the Ability of Classification Models: Predicting whether the Breast Cancer type is Malignant or Benign
+## Predicting Breast Cancer
+### A Comparison of the Ability of Classification Models: Predicting whether the Breast Cancer type is Malignant or Benign
 
 ### STAT 460: Applied Multivariate Analysis - Final Project
 
